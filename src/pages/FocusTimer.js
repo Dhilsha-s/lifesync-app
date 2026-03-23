@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { sanitizeForHTML } from '../lib/validation';
 import AppShell from '../components/AppShell';
@@ -121,6 +121,42 @@ export default function FocusTimer({ onNavigate, userId, goalTitle = '' }) {
     fetchSessionStats();
   }, [userId, todayStr]);
 
+  // 💾 Save focus session to Supabase
+  const saveFocusSession = useCallback(async (completed = false) => {
+    if (!userId || !sessionStartTime) return;
+
+    try {
+      const durationSeconds = elapsedSeconds;
+      const noPauses = pauseCount === 0;
+      let achievementPoints = 0;
+
+      if (completed) {
+        achievementPoints += ACHIEVEMENT_POINTS.complete;
+        if (noPauses) achievementPoints += ACHIEVEMENT_POINTS.noDistraction;
+      }
+
+      const { error } = await supabase.from('focus_sessions').insert({
+        user_id: userId,
+        session_date: todayStr,
+        duration_seconds: durationSeconds,
+        habit_focused: selectedHabit || currentTask || 'General Focus',
+        completed,
+        pauses: pauseCount,
+        achievement_points: achievementPoints,
+      });
+
+      if (error) throw error;
+
+      setSessionStats(prev => ({
+        ...prev,
+        sessionsToday: prev.sessionsToday + 1,
+        totalFocusTime: prev.totalFocusTime + durationSeconds,
+      }));
+    } catch (err) {
+      console.error('FocusTimer: Failed to save session', err);
+    }
+  }, [userId, sessionStartTime, elapsedSeconds, pauseCount, todayStr, selectedHabit, currentTask]);
+
   // ⏱️ Timer logic
   useEffect(() => {
     if (!isRunning) return;
@@ -216,42 +252,6 @@ export default function FocusTimer({ onNavigate, userId, goalTitle = '' }) {
     setSelectedHabit(null);
   };
 
-  // 💾 Save focus session to Supabase
-  const saveFocusSession = async (completed = false) => {
-    if (!userId || !sessionStartTime) return;
-
-    try {
-      const durationSeconds = elapsedSeconds;
-      const noPauses = pauseCount === 0;
-      let achievementPoints = 0;
-
-      if (completed) {
-        achievementPoints += ACHIEVEMENT_POINTS.complete;
-        if (noPauses) achievementPoints += ACHIEVEMENT_POINTS.noDistraction;
-      }
-
-      const { error } = await supabase.from('focus_sessions').insert({
-        user_id: userId,
-        session_date: todayStr,
-        duration_seconds: durationSeconds,
-        habit_focused: selectedHabit || currentTask || 'General Focus',
-        completed,
-        pauses: pauseCount,
-        achievement_points: achievementPoints,
-      });
-
-      if (error) throw error;
-
-      // Update session stats
-      setSessionStats(prev => ({
-        ...prev,
-        sessionsToday: prev.sessionsToday + 1,
-        totalFocusTime: prev.totalFocusTime + durationSeconds,
-      }));
-    } catch (err) {
-      console.error('FocusTimer: Failed to save session', err);
-    }
-  };
 
   // ✅ Complete habit
   const toggleHabit = async (habitName) => {

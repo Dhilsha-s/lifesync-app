@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import AppShell from '../components/AppShell';
 import { createRateLimiter } from '../lib/rateLimiter';
@@ -74,7 +74,7 @@ export default function GoalPlanner({ onNavigate, initialMilestones = null, goal
     return () => clearInterval(timer);
   }, []);
 
-  const calculateAutoProgress = (id) => {
+  const calculateAutoProgress = useCallback((id) => {
     if (habits.length === 0) return 0;
     const uniqueHabits = new Set(habits.map(h => h.habit_name));
     const totalHabitCountPerDay = uniqueHabits.size || 6;
@@ -108,7 +108,7 @@ export default function GoalPlanner({ onNavigate, initialMilestones = null, goal
       return Math.min(100, Math.round((Object.values(habitsByDate).filter(count => count > 0).length / diffDays) * 100));
     }
     return 0;
-  };
+  }, [habits]);
 
   useEffect(() => {
     if (milestoneData) {

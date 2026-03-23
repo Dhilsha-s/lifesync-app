@@ -56,7 +56,6 @@ export default function FocusTimer({ onNavigate, userId, goalTitle = '' }) {
   const [selectedSound, setSelectedSound] = useState(null);
   const soundRef = useRef(null);
   const [motivationalMessage, setMotivationalMessage] = useState('');
-  const [showStats, setShowStats] = useState(true);
   const [completedHabits, setCompletedHabits] = useState({});
 
   // Get today's date

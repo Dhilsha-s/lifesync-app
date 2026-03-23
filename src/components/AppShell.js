@@ -1,12 +1,8 @@
-import { useState } from 'react';
 import BottomNav from './BottomNav';
 import Sidebar from './Sidebar';
-
 import PageTransition from './PageTransition';
 
 export default function AppShell({ activeTab, onNavigate, children }) {
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-
   const getPageTitle = (id) => {
     const titles = { home: 'Home', goals: 'Goals', habits: 'Habits', focus: 'Focus', analytics: 'Analytics' };
     return titles[id] || 'LifeSync';

@@ -39,7 +39,6 @@ function getFallbackHabits(goal) {
   return ["Morning routine", "Deep work 2hr", "Exercise", "Read 30 min", "Reflect/journal", "Sleep 8 hours"];
 }
 
-const currentDate = new Date();
 
 export default function HabitTracker({ onNavigate, goalTitle = '', userId, initialGeneratedHabits = null, groqKey, deadline }) {
   const [columns, setColumns] = useState([]);
@@ -72,7 +71,7 @@ export default function HabitTracker({ onNavigate, goalTitle = '', userId, initi
         todayRowRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
       }, 50);
     }
-  }, [isMobile, loading, currentDate]);
+  }, [isMobile, loading]);
 
   // LOAD DATA: Fetch habits from Supabase, restore checked state, initialize fallback if needed
   useEffect(() => {

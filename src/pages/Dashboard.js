@@ -1,163 +1,252 @@
-import { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import { supabase } from '../lib/supabase';
 import AppShell from '../components/AppShell';
 
-const SAMPLE_TASKS = [
-  { id: '1', title: 'Review weekly goals' },
-  { id: '2', title: '30 min deep work block' },
-  { id: '3', title: 'Log progress in journal' },
+function formatLocalYYYYMMDD(date) {
+  const d = new Date(date);
+  const offset = d.getTimezoneOffset() * 60000;
+  return new Date(d.getTime() - offset).toISOString().split('T')[0];
+}
+
+const QUOTES = [
+  "We are what we repeatedly do. Excellence, then, is not an act, but a habit. — Aristotle",
+  "The secret of getting ahead is getting started. — Mark Twain",
+  "It does not matter how slowly you go as long as you do not stop. — Confucius",
+  "You do not rise to the level of your goals. You fall to the level of your systems. — James Clear",
+  "Motivation is what gets you started. Habit is what keeps you going. — Jim Ryun"
 ];
 
-export default function Dashboard({ name = '', onNavigate }) {
+export default function Dashboard({ name = '', userId, onNavigate }) {
   const displayName = name.trim() || 'there';
+  const today = new Date();
+  
+  const hours = today.getHours();
+  let greeting = 'Good morning';
+  if (hours >= 12 && hours < 17) greeting = 'Good afternoon';
+  else if (hours >= 17) greeting = 'Good evening';
+  
+  const displayDate = today.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+  const selectedQuote = React.useMemo(() => QUOTES[Math.floor(Math.random() * QUOTES.length)], []);
 
-  const [tasks, setTasks] = useState(() =>
-    SAMPLE_TASKS.map((t) => ({ ...t, status: 'open' }))
-  );
-  const [ringReady, setRingReady] = useState(false);
+  const [tasks, setTasks] = useState([]);
+  const [stats, setStats] = useState({ todayProgress: 0, currentStreak: 0, tasksDone: 0 });
+  const [loading, setLoading] = useState(true);
+  const [todayProgress, setTodayProgress] = useState(0);
 
   useEffect(() => {
-    const id = requestAnimationFrame(() => {
-      requestAnimationFrame(() => setRingReady(true));
-    });
-    return () => cancelAnimationFrame(id);
-  }, []);
+    async function fetchDashboard() {
+      if (!userId) { setLoading(false); return; }
+      try {
+        setLoading(true);
+        
+        // 1. Fetch Today's Tasks
+        const { data: userTasks } = await supabase
+          .from('tasks')
+          .select('*')
+          .eq('user_id', userId)
+          .order('created_at', { ascending: false });
+        
+        if (userTasks) setTasks(userTasks.slice(0, 10));
 
-  const doneCount = useMemo(
-    () => tasks.filter((t) => t.status === 'done').length,
-    [tasks]
-  );
-  const total = tasks.length;
-  const completionPct = total ? Math.round((doneCount / total) * 100) : 0;
+        // 2. Fetch Habits for Progress & Streak
+        const { data: habits } = await supabase
+          .from('habits')
+          .select('*')
+          .eq('user_id', userId);
 
-  const markDone = (id) => {
-    setTasks((prev) =>
-      prev.map((t) => (t.id === id ? { ...t, status: 'done' } : t))
-    );
+        if (habits) {
+          const todayStr = formatLocalYYYYMMDD(new Date());
+          const habitsToday = habits.filter(h => h.date === todayStr);
+          const doneToday = habitsToday.filter(h => h.completed).length;
+          const totalToday = habitsToday.length || 1;
+          const progress = Math.round((doneToday / totalToday) * 100);
+          setTodayProgress(progress);
+
+          // Streak
+          const activeDates = new Set(habits.filter(h => h.completed).map(h => h.date));
+          let streak = 0;
+          let cursor = new Date();
+          cursor.setHours(0,0,0,0);
+          
+          if (activeDates.has(formatLocalYYYYMMDD(cursor))) {
+            while(activeDates.has(formatLocalYYYYMMDD(cursor))) {
+              streak++;
+              cursor.setDate(cursor.getDate() - 1);
+            }
+          } else {
+            cursor.setDate(cursor.getDate() - 1);
+            while(activeDates.has(formatLocalYYYYMMDD(cursor))) {
+              streak++;
+              cursor.setDate(cursor.getDate() - 1);
+            }
+          }
+
+          // Tasks done this week
+          const startOfWeek = new Date();
+          startOfWeek.setDate(startOfWeek.getDate() - startOfWeek.getDay());
+          startOfWeek.setHours(0,0,0,0);
+          
+          const tasksDoneThisWeek = userTasks ? userTasks.filter(t => t.status === 'done' && new Date(t.created_at) >= startOfWeek).length : 0;
+
+          setStats({
+            todayProgress: progress,
+            currentStreak: streak,
+            tasksDone: tasksDoneThisWeek
+          });
+        }
+      } catch (e) {
+        console.error(e);
+      } finally {
+        setLoading(false);
+      }
+    }
+    fetchDashboard();
+  }, [userId]);
+
+  const toggleTask = async (id, currentStatus) => {
+    const newStatus = currentStatus === 'done' ? 'open' : 'done';
+    setTasks(prev => prev.map(t => t.id === id ? { ...t, status: newStatus } : t));
+    await supabase.from('tasks').update({ status: newStatus }).eq('id', id);
   };
 
-  const markSkip = (id) => {
-    setTasks((prev) =>
-      prev.map((t) => (t.id === id ? { ...t, status: 'skipped' } : t))
+  if (loading) {
+    return (
+      <AppShell activeTab="home" onNavigate={onNavigate}>
+        <div className="flex h-[50vh] items-center justify-center">
+          <div className="w-8 h-8 border-2 border-zinc-800 border-t-emerald-500 rounded-full animate-spin" />
+        </div>
+      </AppShell>
     );
-  };
-
-  const r = 56;
-  const c = 2 * Math.PI * r;
-  const displayPct = ringReady ? completionPct : 0;
-  const offset = c * (1 - displayPct / 100);
+  }
 
   return (
     <AppShell activeTab="home" onNavigate={onNavigate}>
-      <div className="space-y-8 sm:space-y-10 lg:space-y-12">
-        <header className="animate-rise ls-glass px-5 py-6 opacity-0 shadow-glass [animation-fill-mode:forwards] sm:px-8 sm:py-8">
-          <p className="text-xl font-semibold leading-snug tracking-tight text-white sm:text-2xl lg:text-3xl">
-            Good morning, {displayName}! 👋
-          </p>
-          <p className="mt-2 text-sm leading-relaxed text-zinc-400">
-            Today&apos;s focus — stay consistent, one task at a time.
-          </p>
-        </header>
+      <div className="space-y-8 animate-in fade-in duration-700">
+        
+        {/* Top Greeting Card */}
+        <section className="rounded-3xl bg-[#1a1a1a] border border-[#2a2a2a] p-8 md:p-10 shadow-xl relative overflow-hidden">
+          <div className="relative z-10">
+            <p className="text-zinc-400 text-sm font-medium mb-2 uppercase tracking-widest">{displayDate}</p>
+            <h1 className="text-4xl md:text-5xl font-bold text-white mb-4">{greeting}, {displayName}! 👋</h1>
+            <p className="text-zinc-400 text-lg max-w-2xl italic">"{selectedQuote}"</p>
+          </div>
+          <div className="absolute top-0 right-0 p-8 opacity-10">
+            <svg className="w-32 h-32 text-emerald-500" fill="currentColor" viewBox="0 0 24 24"><path d="M12 3L4 9v12h16V9l-8-6zm0 2.2L18.8 10v10H5.2V10L12 5.2z"/></svg>
+          </div>
+        </section>
 
-        <div className="grid gap-8 lg:grid-cols-2 lg:items-center lg:gap-12">
-          <div className="flex flex-col items-center justify-center lg:items-start">
-            <div className="relative flex h-44 w-44 items-center justify-center sm:h-52 sm:w-52 lg:h-56 lg:w-56">
-              <svg
-                className="h-full w-full -rotate-90 drop-shadow-[0_0_24px_rgba(124,58,237,0.25)]"
-                viewBox="0 0 128 128"
-                aria-hidden
-              >
-                <defs>
-                  <linearGradient id="dashRingGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                    <stop offset="0%" stopColor="#c4b5fd" />
-                    <stop offset="100%" stopColor="#7c3aed" />
-                  </linearGradient>
-                </defs>
-                <circle
-                  cx="64"
-                  cy="64"
-                  r={r}
-                  fill="none"
-                  stroke="rgba(255,255,255,0.08)"
-                  strokeWidth="10"
-                />
-                <circle
-                  cx="64"
-                  cy="64"
-                  r={r}
-                  fill="none"
-                  stroke="url(#dashRingGrad)"
-                  strokeWidth="10"
-                  strokeLinecap="round"
-                  strokeDasharray={c}
-                  strokeDashoffset={offset}
-                  className="transition-[stroke-dashoffset] duration-1000 ease-out"
-                />
-              </svg>
-              <div className="absolute inset-0 flex flex-col items-center justify-center">
-                <span className="text-4xl font-bold tabular-nums text-white sm:text-5xl">
-                  {completionPct}%
-                </span>
-                <span className="mt-1 text-xs font-semibold uppercase tracking-[0.15em] text-zinc-500">
-                  done
-                </span>
-              </div>
+        {/* Stats Row */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl p-6 flex items-center justify-between">
+            <div>
+              <p className="text-zinc-400 text-xs font-bold uppercase tracking-wider mb-1">Today's Progress</p>
+              <h3 className="text-2xl font-bold text-white">{todayProgress}%</h3>
             </div>
-            <div className="mt-6 inline-flex items-center gap-2 rounded-full border border-white/[0.1] bg-white/[0.05] px-5 py-2.5 text-sm font-medium text-zinc-200 shadow-glass-sm backdrop-blur-md lg:mt-8">
-              <span aria-hidden>🔥</span>
-              <span>5 day streak</span>
+            <div className="relative w-16 h-16">
+              <svg className="w-full h-full -rotate-90" viewBox="0 0 36 36">
+                <circle cx="18" cy="18" r="16" fill="none" stroke="#2a2a2a" strokeWidth="3" />
+                <circle cx="18" cy="18" r="16" fill="none" stroke="#10b981" strokeWidth="3" 
+                  strokeDasharray="100" strokeDashoffset={100 - todayProgress} strokeLinecap="round" />
+              </svg>
             </div>
           </div>
 
-          <div>
-            <h2 className="text-xs font-bold uppercase tracking-[0.2em] text-zinc-500">
-              Today&apos;s tasks
-            </h2>
-            <ul className="mt-4 space-y-3 sm:space-y-4">
-              {tasks.map((task, index) => (
-                <li
-                  key={task.id}
-                  className="animate-rise ls-glass px-4 py-4 opacity-0 sm:px-5 sm:py-5"
-                  style={{
-                    animationDelay: `${80 + index * 70}ms`,
-                    animationFillMode: 'forwards',
-                  }}
-                >
-                  <p
-                    className={`text-[15px] font-medium leading-relaxed sm:text-base ${
-                      task.status === 'open'
-                        ? 'text-zinc-100'
-                        : 'text-zinc-500 line-through decoration-zinc-600'
-                    }`}
-                  >
-                    {task.title}
-                  </p>
-                  {task.status === 'open' ? (
-                    <div className="mt-4 flex flex-col gap-2.5 min-[400px]:flex-row">
-                      <button
-                        type="button"
-                        onClick={() => markDone(task.id)}
-                        className="ls-btn-primary flex-1 min-h-[2.85rem] text-[15px]"
-                      >
-                        Done
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => markSkip(task.id)}
-                        className="ls-btn-secondary flex-1 min-h-[2.85rem] text-[15px]"
-                      >
-                        Skip
-                      </button>
-                    </div>
-                  ) : (
-                    <p className="mt-3 text-xs font-semibold uppercase tracking-wide text-zinc-600">
-                      {task.status === 'done' ? 'Completed' : 'Skipped'}
-                    </p>
-                  )}
-                </li>
-              ))}
-            </ul>
+          <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl p-6 flex items-center justify-between">
+            <div>
+              <p className="text-zinc-400 text-xs font-bold uppercase tracking-wider mb-1">Current Streak</p>
+              <h3 className="text-2xl font-bold text-white">{stats.currentStreak} Days 🔥</h3>
+            </div>
+            <div className="bg-emerald-500/10 p-3 rounded-xl">
+              <span className="text-2xl">🔥</span>
+            </div>
+          </div>
+
+          <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl p-6 flex items-center justify-between">
+            <div>
+              <p className="text-zinc-400 text-xs font-bold uppercase tracking-wider mb-1">Tasks Done (Week)</p>
+              <h3 className="text-2xl font-bold text-white">{stats.tasksDone}</h3>
+            </div>
+            <div className="bg-emerald-500/10 p-3 rounded-xl">
+              <span className="text-2xl">✅</span>
+            </div>
           </div>
         </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          <div className="lg:col-span-2 space-y-6">
+            <div className="flex items-center justify-between">
+              <h2 className="text-xl font-bold text-white">Today's Focus</h2>
+            </div>
+            
+            <div className="space-y-3">
+              {tasks.length > 0 ? (
+                tasks.map(task => (
+                  <div key={task.id} className="group bg-[#1a1a1a] border border-[#2a2a2a] hover:border-zinc-700 rounded-xl p-4 flex items-center justify-between transition-all">
+                    <div className="flex items-center gap-4">
+                      <button 
+                        onClick={() => toggleTask(task.id, task.status)}
+                        className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-colors ${
+                          task.status === 'done' ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-zinc-700 hover:border-emerald-500'
+                        }`}
+                      >
+                        {task.status === 'done' && <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"/></svg>}
+                      </button>
+                      <span className={`font-medium ${task.status === 'done' ? 'text-zinc-500 line-through' : 'text-zinc-200'}`}>
+                        {task.title}
+                      </span>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="py-12 text-center bg-[#1a1a1a] border border-dashed border-[#2a2a2a] rounded-2xl">
+                  <p className="text-zinc-500">No tasks for today. Take it easy!</p>
+                </div>
+              )}
+              
+              <button className="w-full py-4 border border-dashed border-[#2a2a2a] rounded-xl text-zinc-500 hover:text-emerald-500 hover:border-emerald-500/50 hover:bg-emerald-500/5 transition-all text-sm font-bold uppercase tracking-widest">
+                + Add task
+              </button>
+            </div>
+          </div>
+
+          <div className="space-y-6">
+            <h2 className="text-xl font-bold text-white">Quick Actions</h2>
+            <div className="grid grid-cols-1 gap-3">
+              <button onClick={() => onNavigate('focus')} className="flex items-center gap-4 p-4 bg-[#1a1a1a] border border-[#2a2a2a] hover:bg-[#222222] rounded-2xl transition-all group">
+                <div className="w-12 h-12 bg-emerald-500 text-black rounded-xl flex items-center justify-center text-xl shadow-lg shadow-emerald-500/10">⏱</div>
+                <div className="text-left">
+                  <p className="font-bold text-white group-hover:text-emerald-400 transition-colors">Focus Session</p>
+                  <p className="text-xs text-zinc-500">Start a deep work block</p>
+                </div>
+              </button>
+
+              <button onClick={() => onNavigate('goals')} className="flex items-center gap-4 p-4 bg-[#1a1a1a] border border-[#2a2a2a] hover:bg-[#222222] rounded-2xl transition-all group">
+                <div className="w-12 h-12 bg-zinc-800 text-white rounded-xl flex items-center justify-center text-xl border border-white/5">📋</div>
+                <div className="text-left">
+                  <p className="font-bold text-white group-hover:text-zinc-300 transition-colors">My Goals</p>
+                  <p className="text-xs text-zinc-500">Review your milestones</p>
+                </div>
+              </button>
+
+              <button onClick={() => onNavigate('habits')} className="flex items-center gap-4 p-4 bg-[#1a1a1a] border border-[#2a2a2a] hover:bg-[#222222] rounded-2xl transition-all group">
+                <div className="w-12 h-12 bg-zinc-800 text-white rounded-xl flex items-center justify-center text-xl border border-white/5">🎯</div>
+                <div className="text-left">
+                  <p className="font-bold text-white group-hover:text-zinc-300 transition-colors">Check Habits</p>
+                  <p className="text-xs text-zinc-500">Log your daily wins</p>
+                </div>
+              </button>
+
+              <button onClick={() => onNavigate('analytics')} className="flex items-center gap-4 p-4 bg-[#1a1a1a] border border-[#2a2a2a] hover:bg-[#222222] rounded-2xl transition-all group">
+                <div className="w-12 h-12 bg-zinc-800 text-white rounded-xl flex items-center justify-center text-xl border border-white/5">📈</div>
+                <div className="text-left">
+                  <p className="font-bold text-white group-hover:text-zinc-300 transition-colors">View Analytics</p>
+                  <p className="text-xs text-zinc-500">See your progress data</p>
+                </div>
+              </button>
+            </div>
+          </div>
+        </div>
+
       </div>
     </AppShell>
   );

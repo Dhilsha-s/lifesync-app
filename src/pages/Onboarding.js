@@ -132,7 +132,10 @@ export default function Onboarding({ onComplete }) {
 
       if (milestoneError) throw new Error(`Failed to save milestones: ${milestoneError.message}`);
 
-      onComplete?.({ name: safeName, bigGoal: safeGoal, deadline: safeDeadline, milestones });
+      // Save user ID locally to persist session
+      localStorage.setItem('lifesync_uid', userData.id);
+
+      onComplete?.({ name: safeName, bigGoal: safeGoal, deadline: safeDeadline, milestones, userId: userData.id });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong. Please try again.');
     } finally {

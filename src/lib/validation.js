@@ -5,6 +5,7 @@
 
 const NAME_MAX = 50;
 const GOAL_MAX = 500;
+const CHAT_INPUT_MAX = 280;
 // Allow letters (any script), spaces, hyphens, apostrophes, and periods.
 const NAME_PATTERN = /^[\p{L}\s\-'.]+$/u;
 
@@ -62,4 +63,4 @@ export function validateDeadline(deadline) {
   return { valid: true, message: '' };
 }
 
-export { NAME_MAX, GOAL_MAX };
+export { NAME_MAX, GOAL_MAX, CHAT_INPUT_MAX };

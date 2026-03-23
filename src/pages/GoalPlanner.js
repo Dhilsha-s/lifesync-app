@@ -1,21 +1,17 @@
 import { useEffect, useRef, useState } from 'react';
+import { supabase } from '../lib/supabase';
 import AppShell from '../components/AppShell';
+import { createRateLimiter } from '../lib/rateLimiter';
+
+const replanLimiter = createRateLimiter(5, 60_000); // 5 replans per minute
 
 const DEFAULT_GOAL_TITLE = 'Get placed in a top company';
 
-const INITIAL_ROWS = [
-  { id: 'year', level: 'Year', period: '2025', milestone: 'Define target companies and compensation band; map skills gaps vs. top-tier bar (DSA, system design, behavioral).' },
-  { id: 'month', level: 'Month', period: 'June 2026', milestone: 'Complete interview prep sprint: 40+ LeetCode mediums, 2 system design deep-dives, and 5 mock behavioral sessions.' },
-  { id: 'week', level: 'Week', period: 'Week of Mar 24', milestone: 'Finalize resume & portfolio; schedule 4 recruiter screens; complete one full mock onsite loop.' },
-  { id: 'day', level: 'Day', period: 'Today', milestone: 'Apply to 5 curated roles, solve 2 timed problems, and send 2 follow-ups from last week\'s networking.' },
-];
-
-const LEVEL_COLORS = {
-  Year:  { bg: 'bg-emerald-500/15', border: 'border-emerald-500/30', text: 'text-emerald-300', dot: '#10b981', glow: 'rgba(16,185,129,0.6)' },
-  Month: { bg: 'bg-teal-500/15',    border: 'border-teal-500/30',    text: 'text-teal-300',    dot: '#14b8a6', glow: 'rgba(20,184,166,0.6)' },
-  Week:  { bg: 'bg-cyan-500/15',    border: 'border-cyan-500/30',    text: 'text-cyan-300',    dot: '#06b6d4', glow: 'rgba(6,182,212,0.6)'  },
-  Day:   { bg: 'bg-sky-500/15',     border: 'border-sky-500/30',     text: 'text-sky-300',     dot: '#0ea5e9', glow: 'rgba(14,165,233,0.6)' },
-};
+function formatLocalYYYYMMDD(date) {
+  const d = new Date(date);
+  const offset = d.getTimezoneOffset() * 60000;
+  return new Date(d.getTime() - offset).toISOString().split('T')[0];
+}
 
 function formatDeadlinePeriod(deadline) {
   if (!deadline) return '—';
@@ -26,20 +22,31 @@ function formatDeadlinePeriod(deadline) {
   } catch { return '—'; }
 }
 
-function rowsFromMilestones(m, deadline) {
-  return [
-    { id: 'year',  level: 'Year',  period: String(new Date().getFullYear()), milestone: m.year  },
-    { id: 'month', level: 'Month', period: formatDeadlinePeriod(deadline),   milestone: m.month },
-    { id: 'week',  level: 'Week',  period: 'This week',                      milestone: m.week  },
-    { id: 'day',   level: 'Day',   period: 'Today',                          milestone: m.day   },
-  ];
+function getCurrentWeekString() {
+  const d = new Date();
+  const day = d.getDay();
+  const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+  const monday = new Date(d.setDate(diff));
+  return `Week of ${monday.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
 }
 
-export default function GoalPlanner({ onNavigate, initialMilestones = null, goalTitle = '', deadline = '' }) {
-  const [rows, setRows] = useState(() =>
-    initialMilestones ? rowsFromMilestones(initialMilestones, deadline) : INITIAL_ROWS
-  );
+function getSliderColor(progress) {
+  if (progress <= 33) return 'bg-red-500';
+  if (progress <= 66) return 'bg-yellow-500';
+  return 'bg-emerald-500';
+}
+
+export default function GoalPlanner({ onNavigate, initialMilestones = null, goalTitle = '', deadline = '', userId, groqKey }) {
+  const [loading, setLoading] = useState(true);
+  const [replanLoading, setReplanLoading] = useState(false);
+  const [milestoneData, setMilestoneData] = useState(null);
+  const [habits, setHabits] = useState([]);
+  const [rows, setRows] = useState([]);
   const [spotlight, setSpotlight] = useState({ x: -999, y: -999 });
+  const [lastUpdatedLabel, setLastUpdatedLabel] = useState('just now');
+  const lastFetchedAt = useRef(null);
+
+
   const title = goalTitle.trim() || DEFAULT_GOAL_TITLE;
 
   useEffect(() => {
@@ -48,133 +55,130 @@ export default function GoalPlanner({ onNavigate, initialMilestones = null, goal
     return () => window.removeEventListener('mousemove', move);
   }, []);
 
-  const updateRow = (id, field, value) =>
-    setRows((prev) => prev.map((row) => (row.id === id ? { ...row, [field]: value } : row)));
+  useEffect(() => {
+    async function fetchData() {
+      if (!userId) { setLoading(false); return; }
+      try {
+        const [milestoneRes, habitsRes] = await Promise.all([
+          supabase.from('milestones').select('*').eq('user_id', userId).single(),
+          supabase.from('habits').select('date, completed, habit_name').eq('user_id', userId)
+        ]);
+        if (milestoneRes.data) setMilestoneData(milestoneRes.data);
+        else if (initialMilestones) setMilestoneData(initialMilestones);
+        if (habitsRes.data) setHabits(habitsRes.data);
+        lastFetchedAt.current = Date.now();
+        setLastUpdatedLabel('just now');
+      } catch (err) { console.error("GoalPlanner: Failed to fetch data"); } finally { setLoading(false); }
+    }
+    fetchData();
+  }, [userId, initialMilestones]);
+
+  // Keep the "Last updated" label fresh
+  useEffect(() => {
+    const timer = setInterval(() => {
+      if (!lastFetchedAt.current) return;
+      const seconds = Math.round((Date.now() - lastFetchedAt.current) / 1000);
+      if (seconds < 10) setLastUpdatedLabel('just now');
+      else if (seconds < 60) setLastUpdatedLabel(`${seconds}s ago`);
+      else setLastUpdatedLabel(`${Math.floor(seconds / 60)}m ago`);
+    }, 5000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const calculateAutoProgress = (id) => {
+    if (habits.length === 0) return 0;
+    const uniqueHabits = new Set(habits.map(h => h.habit_name));
+    const totalHabitCountPerDay = uniqueHabits.size || 6;
+    const todayStr = formatLocalYYYYMMDD(new Date());
+
+    if (id === 'day') {
+      const todayHabits = habits.filter(h => h.date === todayStr);
+      const done = todayHabits.filter(h => h.completed).length;
+      return totalHabitCountPerDay ? Math.round((done / totalHabitCountPerDay) * 100) : 0;
+    }
+    if (id === 'week') {
+      const last7Days = Array.from({ length: 7 }, (_, i) => {
+        const d = new Date(); d.setDate(new Date().getDate() - i);
+        return formatLocalYYYYMMDD(d);
+      });
+      const weekHabits = habits.filter(h => last7Days.includes(h.date));
+      return Math.round((weekHabits.filter(h => h.completed).length / (totalHabitCountPerDay * 7)) * 100);
+    }
+    if (id === 'month') {
+      const now = new Date();
+      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+      const monthHabits = habits.filter(h => new Date(h.date) >= monthStart);
+      return Math.round((monthHabits.filter(h => h.completed).length / (totalHabitCountPerDay * now.getDate())) * 100);
+    }
+    if (id === 'year') {
+      const habitsByDate = habits.reduce((acc, h) => { acc[h.date] = (acc[h.date] || 0) + (h.completed ? 1 : 0); return acc; }, {});
+      const distinctDates = Object.keys(habitsByDate).sort();
+      if (distinctDates.length === 0) return 0;
+      const start = new Date(distinctDates[0]), end = new Date();
+      const diffDays = Math.ceil(Math.abs(end - start) / (1000 * 60 * 60 * 24)) || 1;
+      return Math.min(100, Math.round((Object.values(habitsByDate).filter(count => count > 0).length / diffDays) * 100));
+    }
+    return 0;
+  };
+
+  useEffect(() => {
+    if (milestoneData) {
+      const tiers = ['year', 'month', 'week', 'day'];
+      const newRows = tiers.map(tier => ({
+        id: tier,
+        level: tier.charAt(0).toUpperCase() + tier.slice(1),
+        period: tier === 'day' ? 'Today' : (tier === 'week' ? getCurrentWeekString() : (tier === 'month' ? formatDeadlinePeriod(deadline) : String(new Date().getFullYear()))),
+        milestone: milestoneData[`${tier}_milestone`] || milestoneData[tier] || '',
+        progress: calculateAutoProgress(tier),
+      }));
+      setRows(newRows);
+    }
+  }, [milestoneData, habits, deadline]);
+
+  const handleReplan = async () => {
+    if (!groqKey && !process.env.REACT_APP_GROQ_KEY) return;
+    
+    const { allowed, retryAfterMs } = replanLimiter.checkLimit();
+    if (!allowed) {
+      const secs = Math.ceil(retryAfterMs / 1000);
+      alert(`Please wait ${secs}s before re-planning again.`);
+      return;
+    }
+
+    setReplanLoading(true);
+    try {
+      const prompt = `Goal: "${title}". Suggest revised plan. Return JSON: {"year": "...", "month": "...", "week": "...", "day": "..."}`;
+      const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${groqKey || process.env.REACT_APP_GROQ_KEY}` },
+        body: JSON.stringify({ model: 'llama-3.3-70b-versatile', messages: [{ role: 'system', content: prompt }] }),
+      });
+      const content = (await response.json()).choices[0].message.content;
+      const parsed = JSON.parse(content.match(/\{[\s\S]*?\}/)[0]);
+      if (parsed.year) {
+        setRows(prev => prev.map(r => ({ ...r, milestone: parsed[r.id] })));
+        if (userId) await supabase.from('milestones').update({ year_milestone: parsed.year, month_milestone: parsed.month, week_milestone: parsed.week, day_milestone: parsed.day }).eq('user_id', userId);
+      }
+    } catch (err) { console.error("GoalPlanner: Re-plan failed"); } finally { setReplanLoading(false); }
+  };
+
+  const overallProgress = rows.length ? Math.round(rows.reduce((acc, row) => acc + row.progress, 0) / rows.length) : 0;
+
+  if (loading) {
+    return (
+      <AppShell activeTab="goals" onNavigate={onNavigate}>
+        <div className="flex h-[50vh] items-center justify-center"><div className="w-8 h-8 border-2 border-[#333333] border-t-emerald-500 rounded-full animate-spin" /></div>
+      </AppShell>
+    );
+  }
 
   return (
     <AppShell activeTab="goals" onNavigate={onNavigate}>
-      {/* Spotlight */}
-      <div
-        className="pointer-events-none fixed inset-0 z-0"
-        style={{ background: `radial-gradient(600px circle at ${spotlight.x}px ${spotlight.y}px, rgba(16,185,129,0.06), transparent 70%)` }}
-      />
-
-      <div className="relative z-10 space-y-6">
-
-        {/* Header */}
-        <header
-          className="rounded-2xl border border-white/[0.07] bg-white/[0.03] px-6 py-6 backdrop-blur-md"
-          style={{ animation: 'riseUp 0.5s ease forwards', opacity: 0, boxShadow: '0 0 40px rgba(16,185,129,0.06)' }}
-        >
-          <p className="text-xs font-bold uppercase tracking-widest text-emerald-400">Goal Planner</p>
-          <h1 className="mt-2 text-2xl font-bold text-white sm:text-3xl lg:text-4xl">{title}</h1>
-          <p className="mt-2 max-w-2xl text-sm text-zinc-400">
-            Break your goal into year → month → week → day milestones. Edit any cell — your plan stays in sync.
-          </p>
-        </header>
-
-        <div className="grid gap-6 xl:grid-cols-[1fr_280px]">
-
-          {/* Timeline Table */}
-          <div
-            className="rounded-2xl border border-white/[0.07] bg-white/[0.03] p-5 backdrop-blur-md sm:p-7"
-            style={{ animation: 'riseUp 0.5s 0.1s ease forwards', opacity: 0 }}
-          >
-            <div className="mb-5 flex items-center justify-between border-b border-white/[0.06] pb-4">
-              <span className="text-xs font-bold uppercase tracking-widest text-zinc-500">Timeline</span>
-              <span className="text-xs font-semibold text-emerald-400">Year → Month → Week → Day</span>
-            </div>
-
-            <div className="space-y-4">
-              {rows.map((row, i) => {
-                const colors = LEVEL_COLORS[row.level];
-                return (
-                  <div
-                    key={row.id}
-                    className="flex gap-4"
-                    style={{ animation: 'riseUp 0.5s ease forwards', animationDelay: `${i * 100 + 200}ms`, opacity: 0 }}
-                  >
-                    {/* Timeline dot + line */}
-                    <div className="flex flex-col items-center pt-3">
-                      <span
-                        className="h-3 w-3 shrink-0 rounded-full"
-                        style={{ background: colors.dot, boxShadow: `0 0 10px ${colors.glow}` }}
-                      />
-                      {i < rows.length - 1 && (
-                        <span className="mt-1 block w-px flex-1 min-h-[80px]"
-                          style={{ background: `linear-gradient(to bottom, ${colors.dot}60, transparent)` }} />
-                      )}
-                    </div>
-
-                    {/* Card */}
-                    <div className={`flex-1 rounded-xl border ${colors.border} bg-white/[0.02] p-4 transition-all duration-200 hover:bg-white/[0.04]`}>
-                      <div className="mb-3 flex flex-wrap items-center gap-3">
-                        <span className={`rounded-lg border ${colors.border} ${colors.bg} px-3 py-1 text-xs font-bold ${colors.text}`}>
-                          {row.level}
-                        </span>
-                        <input
-                          type="text"
-                          value={row.period}
-                          onChange={(e) => updateRow(row.id, 'period', e.target.value)}
-                          className="rounded-lg border border-white/10 bg-white/5 px-3 py-1 text-xs text-zinc-300 outline-none transition-all focus:border-emerald-500/40 focus:ring-1 focus:ring-emerald-500/20 w-32"
-                        />
-                      </div>
-                      <textarea
-                        value={row.milestone}
-                        onChange={(e) => updateRow(row.id, 'milestone', e.target.value)}
-                        rows={2}
-                        className="w-full resize-y rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-zinc-200 outline-none transition-all focus:border-emerald-500/40 focus:ring-1 focus:ring-emerald-500/20 leading-relaxed"
-                      />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Tips Sidebar */}
-          <aside
-            className="rounded-2xl border border-white/[0.07] bg-white/[0.03] p-5 backdrop-blur-md sm:p-6"
-            style={{ animation: 'riseUp 0.5s 0.3s ease forwards', opacity: 0 }}
-          >
-            <p className="text-xs font-bold uppercase tracking-widest text-zinc-500 mb-4">Quick Tips</p>
-            <ul className="space-y-4">
-              {[
-                'Shorter milestones for "Day" make habits stick.',
-                'Align "Month" with a measurable outcome you can review.',
-                'Revisit your Week goal every Sunday evening.',
-                'Your Day task should take less than 2 hours.',
-              ].map((tip, i) => (
-                <li
-                  key={i}
-                  className="flex gap-3 text-sm leading-relaxed text-zinc-400"
-                  style={{ animation: 'riseUp 0.4s ease forwards', animationDelay: `${i * 80 + 400}ms`, opacity: 0 }}
-                >
-                  <span className="text-emerald-400 mt-0.5 shrink-0">→</span>
-                  {tip}
-                </li>
-              ))}
-            </ul>
-
-            {/* Progress indicator */}
-            <div className="mt-8 rounded-xl border border-emerald-500/20 bg-emerald-500/10 p-4">
-              <p className="text-xs font-semibold text-emerald-400 mb-2">Plan Status</p>
-              <p className="text-xs text-zinc-400">All 4 milestones defined ✓</p>
-              <div className="mt-2 h-1.5 w-full rounded-full bg-white/5 overflow-hidden">
-                <div className="h-full rounded-full transition-all duration-1000"
-                  style={{ width: '100%', background: 'linear-gradient(90deg, #6ee7b7, #10b981)', boxShadow: '0 0 8px rgba(16,185,129,0.5)' }} />
-              </div>
-            </div>
-          </aside>
-        </div>
+      <div className="pointer-events-none fixed inset-0 z-0" style={{ background: `radial-gradient(600px circle at ${spotlight.x}px ${spotlight.y}px, rgba(16,185,129,0.06), transparent 70%)` }} />
+      <div className="relative z-10 space-y-10 max-w-6xl mx-auto py-10">
+        <header className="flex flex-col md:flex-row md:items-end justify-between gap-6 pb-6 border-b border-white/5"><div className="space-y-4 text-center md:text-left"><div className="inline-flex items-center gap-2 px-3 py-1 bg-emerald-500/10 border border-emerald-500/20 rounded-full text-[10px] font-bold text-emerald-400 uppercase tracking-widest">Target Reached: {overallProgress}%</div><h1 className="text-4xl md:text-6xl font-bold text-white tracking-tighter leading-tight max-w-2xl">{title}</h1><p className="text-zinc-500 text-lg">Your master plan, broken down for clarity.</p></div><button onClick={handleReplan} disabled={replanLoading} className="px-8 py-4 bg-white text-black rounded-2xl font-bold hover:bg-zinc-200 transition-all active:scale-[0.98] disabled:opacity-50">{replanLoading ? 'Planning...' : '🔄 Re-plan with AI'}</button></header>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">{rows.map((row) => (<div key={row.id} className="bg-[#1a1a1a] border border-[#2a2a2a] p-8 rounded-3xl space-y-6 relative overflow-hidden group"><div className="flex justify-between items-start mb-2"><div className="space-y-1"><p className="text-zinc-500 text-[10px] font-bold uppercase tracking-widest">{row.level} Goal</p><p className="text-zinc-400 text-xs">{row.period}</p></div><div className="bg-white/5 p-2 rounded-xl group-hover:bg-emerald-500/10 transition-colors">🎯</div></div><h3 className="text-xl font-bold text-white leading-relaxed">{row.milestone}</h3><div className="space-y-3"><div className="flex justify-between text-xs font-bold text-zinc-500 uppercase tracking-tighter"><span>Progress</span><span>{row.progress}%</span></div><div className="h-2 w-full bg-[#111] rounded-full overflow-hidden"><div className={`h-full ${getSliderColor(row.progress)} transition-all duration-1000`} style={{ width: `${row.progress}%` }} /></div><p className="text-[10px] text-zinc-600 font-medium">Last updated: {lastUpdatedLabel}</p></div></div>))}</div>
       </div>
-
-      <style>{`
-        @keyframes riseUp {
-          from { opacity: 0; transform: translateY(20px); }
-          to   { opacity: 1; transform: translateY(0); }
-        }
-      `}</style>
     </AppShell>
   );
 }

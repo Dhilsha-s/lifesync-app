@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import AppShell from '../components/AppShell';
 import { createRateLimiter } from '../lib/rateLimiter';
@@ -45,6 +45,7 @@ export default function GoalPlanner({ onNavigate, initialMilestones = null, goal
   const [rows, setRows] = useState([]);
   const [spotlight, setSpotlight] = useState({ x: -999, y: -999 });
   const [lastUpdatedLabel, setLastUpdatedLabel] = useState('just now');
+  const lastFetchedAt = useRef(null);
 
 
   const title = goalTitle.trim() || DEFAULT_GOAL_TITLE;

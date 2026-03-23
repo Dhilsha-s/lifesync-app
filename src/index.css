@@ -1,16 +1,33 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700;900&display=swap');
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 @layer base {
+  :root {
+    --bg: #0a0a0a;
+    --surface: #111111;
+    --card: #161616;
+    --border: #1f1f1f;
+    --lime: #C8F135;
+    --pink: #FF3CAC;
+    --yellow: #FFE500;
+    --cyan: #3CC8FF;
+    --text-primary: #FFFFFF;
+    --text-muted: #555555;
+    --text-dim: #333333;
+    --font: 'DM Sans', 'Helvetica Neue', sans-serif;
+  }
+  
   html {
     @apply scroll-smooth;
   }
   body {
-    @apply font-sans antialiased text-zinc-100;
-    @apply bg-zinc-950;
+    font-family: var(--font);
+    background-color: var(--bg);
+    color: var(--text-primary);
+    @apply antialiased;
   }
 }
 

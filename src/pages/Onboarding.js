@@ -52,7 +52,7 @@ export default function Onboarding({ onComplete }) {
   const [bigGoal, setBigGoal] = useState('');
   const [deadline, setDeadline] = useState('');
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
+  const [errors, setErrors] = useState({});
   const [spotlight, setSpotlight] = useState({ x: -999, y: -999 });
 
   useEffect(() => {
@@ -63,31 +63,63 @@ export default function Onboarding({ onComplete }) {
 
   async function handleSubmit(e) {
     e.preventDefault();
-    setError('');
+    setErrors({});
 
-    // --- Input validation (runs before any network call) ---
-    const nameCheck = validateName(name);
-    if (!nameCheck.valid) { setError(nameCheck.message); return; }
+    const newErrors = {};
+    
+    // 1. Name validation
+    const strippedName = name.replace(/<[^>]*>/g, '').trim();
+    if (!strippedName) {
+      newErrors.name = "Name is required";
+    } else if (strippedName.length > 50) {
+      newErrors.name = "Name must be under 50 characters";
+    }
 
-    const goalCheck = validateGoal(bigGoal);
-    if (!goalCheck.valid) { setError(goalCheck.message); return; }
+    // 2. Goal validation
+    const strippedGoal = bigGoal.replace(/<[^>]*>/g, '').trim();
+    if (!strippedGoal) {
+      newErrors.goal = "Please enter your goal";
+    } else if (strippedGoal.length < 10) {
+      newErrors.goal = "Please describe your goal in more detail";
+    } else if (strippedGoal.length > 500) {
+      newErrors.goal = "Goal must be under 500 characters";
+    }
 
-    const deadlineCheck = validateDeadline(deadline);
-    if (!deadlineCheck.valid) { setError(deadlineCheck.message); return; }
+    // 3. Deadline validation
+    if (!deadline) {
+      newErrors.deadline = "Please select a deadline";
+    } else {
+      const d = new Date(deadline);
+      const now = new Date();
+      now.setHours(0,0,0,0); // compare at date level
+      if (d <= now) {
+        newErrors.deadline = "Deadline must be in the future";
+      } else {
+        const tenYears = new Date();
+        tenYears.setFullYear(tenYears.getFullYear() + 10);
+        if (d > tenYears) {
+          newErrors.deadline = "Please set a realistic deadline";
+        }
+      }
+    }
+
+    if (Object.keys(newErrors).length > 0) {
+      setErrors(newErrors);
+      return;
+    }
 
     // --- Rate limiting ---
     const { allowed, retryAfterMs } = submitLimiter.checkLimit();
     if (!allowed) {
       const secs = Math.ceil(retryAfterMs / 1000);
-      setError(`Too many requests. Please wait ${secs} second${secs !== 1 ? 's' : ''} and try again.`);
+      setErrors({ form: `Too many requests. Please wait ${secs} second${secs !== 1 ? 's' : ''} and try again.` });
       return;
     }
 
     setLoading(true);
 
-    // Sanitise inputs
-    const safeName = name.trim().slice(0, NAME_MAX);
-    const safeGoal = bigGoal.trim().slice(0, GOAL_MAX);
+    const safeName = strippedName;
+    const safeGoal = strippedGoal;
     const safeDeadline = deadline.trim();
     try {
       const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
@@ -110,7 +142,6 @@ export default function Onboarding({ onComplete }) {
       const milestones = parseMilestonesJson(text);
 
       // --- Save to Supabase ---
-      // 1. Insert user into "users" table
       const { data: userData, error: userError } = await supabase
         .from('users')
         .insert([{ name: safeName, goal: safeGoal, deadline: safeDeadline }])
@@ -119,7 +150,6 @@ export default function Onboarding({ onComplete }) {
 
       if (userError) throw new Error(`Failed to save user: ${userError.message}`);
 
-      // 2. Insert milestones into "milestones" table
       const { error: milestoneError } = await supabase
         .from('milestones')
         .insert({
@@ -132,153 +162,133 @@ export default function Onboarding({ onComplete }) {
 
       if (milestoneError) throw new Error(`Failed to save milestones: ${milestoneError.message}`);
 
-      // Save user ID locally to persist session
       localStorage.setItem('lifesync_uid', userData.id);
-
       onComplete?.({ name: safeName, bigGoal: safeGoal, deadline: safeDeadline, milestones, userId: userData.id });
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Something went wrong. Please try again.');
+      setErrors({ form: err instanceof Error ? err.message : 'Something went wrong. Please try again.' });
     } finally {
       setLoading(false);
     }
   }
 
   return (
-    <div className="relative min-h-screen overflow-hidden text-zinc-100" style={{ background: '#0a0a0f' }}>
+    <div 
+      className="min-h-screen bg-[#0a0a0a] flex flex-col md:grid md:grid-cols-[55%_45%] md:items-center px-[20px] py-[24px] md:pl-[80px] md:pr-[48px]"
+      style={{ fontFamily: "'DM Sans', 'Helvetica Neue', sans-serif" }}
+    >
+      {/* Left side */}
+      <header className="flex flex-col mb-10 md:mb-0" style={{ animation: 'riseUp 0.6s ease forwards', opacity: 0 }}>
+        <div className="mb-4 inline-flex items-center self-start rounded-full border border-[#2a2a2a] bg-[#1a1a1a] px-3 py-1.5 text-[11px] font-[600] text-[#C8F135] tracking-[1px] uppercase">
+          ✦ AI-Powered Planning
+        </div>
+        <h1 className="text-[40px] md:text-[64px] font-[900] text-[#ffffff] tracking-[-2px] leading-tight">
+          LifeSync
+        </h1>
+        <p className="mt-4 text-[15px] md:text-[18px] font-[400] text-[#444444] max-w-md">
+          Turn your goals into daily action — with a plan that adapts to your deadline.
+        </p>
 
-      {/* Spotlight */}
-      <div
-        className="pointer-events-none fixed inset-0 z-0"
-        style={{
-          background: `radial-gradient(700px circle at ${spotlight.x}px ${spotlight.y}px, rgba(16,185,129,0.08), transparent 70%)`,
-        }}
-      />
-
-      {/* Background orbs */}
-      <div className="pointer-events-none fixed inset-0 z-0 overflow-hidden">
-        <div className="absolute -top-40 -left-40 h-96 w-96 rounded-full opacity-20"
-          style={{ background: 'radial-gradient(circle, #10b981, transparent 70%)', filter: 'blur(60px)' }} />
-        <div className="absolute -bottom-40 -right-40 h-96 w-96 rounded-full opacity-10"
-          style={{ background: 'radial-gradient(circle, #6ee7b7, transparent 70%)', filter: 'blur(80px)' }} />
-      </div>
-
-      <div className="relative z-10 mx-auto flex min-h-screen max-w-6xl flex-col px-4 py-10 sm:px-6 lg:px-10 lg:py-20">
-        <div className="grid flex-1 items-center gap-10 lg:grid-cols-2 lg:gap-16">
-
-          {/* Left — Branding */}
-          <header style={{ animation: 'riseUp 0.6s ease forwards', opacity: 0 }}
-            className="text-center lg:text-left">
-            <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-4 py-1.5 text-xs font-semibold text-emerald-400 tracking-widest uppercase">
-              ✦ AI-Powered Planning
-            </div>
-            <h1
-              className="text-5xl font-bold tracking-tight text-white sm:text-6xl lg:text-7xl"
-              style={{ textShadow: '0 0 40px rgba(16,185,129,0.5), 0 0 80px rgba(16,185,129,0.2)' }}
+        <div className="mt-8 hidden flex-wrap gap-2 lg:flex">
+          {['AI Goal Breakdown', 'Daily Tasks', 'Focus Timer', 'Analytics'].map((f, i) => (
+            <span
+              key={f}
+              className="rounded-full border border-[#1f1f1f] bg-[#141414] px-[14px] py-[6px] text-[12px] text-[#555555]"
+              style={{ animation: `riseUp 0.5s ${i * 80 + 400}ms ease forwards`, opacity: 0 }}
             >
-              LifeSync
-            </h1>
-            <p className="mt-5 text-lg leading-relaxed text-zinc-400 sm:text-xl lg:max-w-md">
-              Turn your goals into daily action — with a plan that adapts to your deadline.
-            </p>
+              {f}
+            </span>
+          ))}
+        </div>
+      </header>
 
-            {/* Feature pills */}
-            <div className="mt-8 hidden flex-wrap gap-3 lg:flex">
-              {['AI Goal Breakdown', 'Daily Tasks', 'Focus Timer', 'Analytics'].map((f, i) => (
-                <span
-                  key={f}
-                  className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-zinc-400"
-                  style={{ animation: `riseUp 0.5s ${i * 80 + 400}ms ease forwards`, opacity: 0 }}
-                >
-                  {f}
-                </span>
-              ))}
-            </div>
-          </header>
-
-          {/* Right — Form */}
-          <div style={{ animation: 'riseUp 0.6s 0.15s ease forwards', opacity: 0 }}>
-            <div className="relative rounded-2xl border border-white/[0.08] bg-white/[0.03] p-6 shadow-2xl backdrop-blur-xl sm:p-8 lg:p-10"
-              style={{ boxShadow: '0 0 60px rgba(16,185,129,0.08), 0 25px 50px rgba(0,0,0,0.5)' }}>
-
-              {/* Loading overlay */}
-              {loading && (
-                <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-5 rounded-2xl bg-black/70 backdrop-blur-md">
-                  <div className="relative h-16 w-16">
-                    <div className="absolute inset-0 rounded-full border-2 border-emerald-500/20" />
-                    <div className="absolute inset-0 animate-spin rounded-full border-2 border-transparent border-t-emerald-400"
-                      style={{ boxShadow: '0 0 20px rgba(16,185,129,0.4)' }} />
-                  </div>
-                  <p className="text-sm font-semibold text-emerald-300">AI is building your plan...</p>
-                </div>
+      {/* Right side */}
+      <div style={{ animation: 'riseUp 0.6s 0.15s ease forwards', opacity: 0 }} className="w-full max-w-[500px] mx-auto md:max-w-none">
+        <div className="rounded-[16px] md:rounded-[20px] border border-[#1f1f1f] bg-[#111111] p-[24px] md:p-[32px]">
+          
+          <form onSubmit={handleSubmit} className="flex flex-col gap-5">
+            {/* Name */}
+            <div style={{ animation: 'riseUp 0.5s 0.2s ease forwards', opacity: 0 }}>
+              <label className="mb-[8px] block text-[12px] font-[600] text-[#888888] uppercase tracking-[0.8px]">
+                Name
+              </label>
+              <input
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Your name"
+                disabled={loading}
+                className={`w-full rounded-[12px] border ${errors.name ? 'border-[#ff4d4d]' : 'border-[#1f1f1f]'} bg-[#0a0a0a] p-[14px_16px] text-[15px] text-[#ffffff] outline-none transition-colors focus:border-[#C8F135] disabled:opacity-50`}
+              />
+              {errors.name && (
+                <p className="text-[#ff4d4d] text-[12px] mt-1.5 ml-1">{errors.name}</p>
               )}
-
-              {error && (
-                <div className="mb-5 rounded-xl border border-red-500/30 bg-red-950/40 px-4 py-3 text-sm text-red-300">
-                  {error}
-                </div>
-              )}
-
-              <form onSubmit={handleSubmit} className="space-y-5">
-                {/* Name */}
-                <div style={{ animation: 'riseUp 0.5s 0.2s ease forwards', opacity: 0 }}>
-                  <label className="mb-1.5 block text-sm font-semibold text-zinc-300">Name</label>
-                  <input
-                    type="text"
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    placeholder="Your name"
-                    maxLength={NAME_MAX}
-                    required
-                    disabled={loading}
-                    className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white placeholder-zinc-600 outline-none transition-all duration-200 focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/30 disabled:opacity-50"
-                  />
-                </div>
-
-                {/* Big Goal */}
-                <div style={{ animation: 'riseUp 0.5s 0.3s ease forwards', opacity: 0 }}>
-                  <label className="mb-1.5 block text-sm font-semibold text-zinc-300">Big Goal</label>
-                  <textarea
-                    rows={4}
-                    value={bigGoal}
-                    onChange={(e) => setBigGoal(e.target.value)}
-                    placeholder="What do you want to achieve?"
-                    maxLength={GOAL_MAX}
-                    required
-                    disabled={loading}
-                    className="w-full resize-y rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white placeholder-zinc-600 outline-none transition-all duration-200 focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/30 disabled:opacity-50"
-                  />
-                </div>
-
-                {/* Deadline */}
-                <div style={{ animation: 'riseUp 0.5s 0.4s ease forwards', opacity: 0 }}>
-                  <label className="mb-1.5 block text-sm font-semibold text-zinc-300">Deadline</label>
-                  <input
-                    type="date"
-                    value={deadline}
-                    onChange={(e) => setDeadline(e.target.value)}
-                    required
-                    disabled={loading}
-                    className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none transition-all duration-200 focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/30 disabled:opacity-50 [color-scheme:dark]"
-                  />
-                </div>
-
-                {/* Submit */}
-                <div style={{ animation: 'riseUp 0.5s 0.5s ease forwards', opacity: 0 }}>
-                  <MagneticButton
-                    type="submit"
-                    disabled={loading}
-                    className="w-full rounded-xl py-3.5 text-sm font-bold text-black disabled:opacity-50 disabled:cursor-not-allowed"
-                    style={{
-                      background: 'linear-gradient(135deg, #6ee7b7, #10b981)',
-                      boxShadow: '0 0 30px rgba(16,185,129,0.4)',
-                    }}
-                  >
-                    {loading ? 'Generating...' : '✦ Generate My Plan'}
-                  </MagneticButton>
-                </div>
-              </form>
             </div>
-          </div>
+
+            {/* Big Goal */}
+            <div style={{ animation: 'riseUp 0.5s 0.3s ease forwards', opacity: 0 }}>
+              <label className="mb-[8px] block text-[12px] font-[600] text-[#888888] uppercase tracking-[0.8px]">
+                Big Goal
+              </label>
+              <textarea
+                value={bigGoal}
+                onChange={(e) => setBigGoal(e.target.value)}
+                placeholder="What do you want to achieve?"
+                disabled={loading}
+                className={`w-full h-[110px] resize-none rounded-[12px] border ${errors.goal ? 'border-[#ff4d4d]' : 'border-[#1f1f1f]'} bg-[#0a0a0a] p-[14px_16px] text-[15px] text-[#ffffff] outline-none transition-colors focus:border-[#C8F135] disabled:opacity-50`}
+              />
+              {errors.goal && (
+                <p className="text-[#ff4d4d] text-[12px] mt-1.5 ml-1">{errors.goal}</p>
+              )}
+            </div>
+
+            {/* Deadline */}
+            <div style={{ animation: 'riseUp 0.5s 0.4s ease forwards', opacity: 0 }}>
+              <label className="mb-[8px] block text-[12px] font-[600] text-[#888888] uppercase tracking-[0.8px]">
+                Deadline
+              </label>
+              <input
+                type="date"
+                value={deadline}
+                onChange={(e) => setDeadline(e.target.value)}
+                disabled={loading}
+                className={`w-full rounded-[12px] border ${errors.deadline ? 'border-[#ff4d4d]' : 'border-[#1f1f1f]'} bg-[#0a0a0a] p-[14px_16px] text-[15px] text-[#ffffff] outline-none transition-colors focus:border-[#C8F135] disabled:opacity-50 [color-scheme:dark]`}
+              />
+              {errors.deadline && (
+                <p className="text-[#ff4d4d] text-[12px] mt-1.5 ml-1">{errors.deadline}</p>
+              )}
+            </div>
+
+            {/* Form Error Message */}
+            {errors.form && (
+              <div className="text-center text-[#ff4d4d] text-[13px] mt-[8px]">
+                {errors.form}
+              </div>
+            )}
+
+            {/* Submit */}
+            <div style={{ animation: 'riseUp 0.5s 0.5s ease forwards', opacity: 0 }}>
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full h-[54px] rounded-[14px] font-[800] text-[15px] transition-colors flex items-center justify-center gap-2"
+                style={{
+                  background: loading ? '#1a1a1a' : '#C8F135',
+                  color: loading ? '#444444' : '#0a0a0a',
+                  cursor: loading ? 'not-allowed' : 'pointer',
+                  border: 'none',
+                }}
+              >
+                {loading ? (
+                  <>
+                    <div className="w-[18px] h-[18px] rounded-full border-[2px] border-[#333333] border-t-[#666666] animate-spin" />
+                    Generating your plan…
+                  </>
+                ) : (
+                  '✦ Generate My Plan'
+                )}
+              </button>
+            </div>
+          </form>
         </div>
       </div>
 

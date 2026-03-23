@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { createRateLimiter } from '../lib/rateLimiter';
-import { CHAT_INPUT_MAX } from '../lib/validation';
+import { CHAT_INPUT_MAX, sanitizeForHTML } from '../lib/validation';
 
 const chatLimiter = createRateLimiter(10, 60_000);
 
@@ -21,10 +21,10 @@ function getFallbackHabits(text) {
 
 export default function HabitSetup({ onComplete, goalTitle = '' }) {
   const [messages, setMessages] = useState([
-    { 
-      role: 'ai', 
-      text: goalTitle 
-        ? `Hi there! I'm here to help you design a habit tracker that actually fits into your daily life.\n\nI see your main focus is "${goalTitle}". Tell me a bit more about what makes this important to you, and what your typical day looks like so far!` 
+    {
+      role: 'ai',
+      text: goalTitle
+        ? `Hi there! I'm here to help you design a habit tracker that actually fits into your daily life.\n\nI see your main focus is "${goalTitle}". Tell me a bit more about what makes this important to you, and what your typical day looks like so far!`
         : `Hi there! I'm here to help you design a habit tracker that actually fits into your daily life.\n\nFirst, what is your main goal? And what does your typical day look like right now?`,
       time: formatTime(new Date())
     }
@@ -104,10 +104,11 @@ HABITS_READY
         const parts = aiResponse.split('HABITS_READY');
         const textPart = parts[0].trim();
         const jsonPart = parts[1].trim();
-        
+
         // Show the text part if it exists before navigating away
         if (textPart) {
-          setMessages(prev => [...prev, { role: 'ai', text: textPart, time: formatTime(new Date()) }]);
+          // 🔒 SECURITY: Sanitize AI response before displaying
+          setMessages(prev => [...prev, { role: 'ai', text: sanitizeForHTML(textPart), time: formatTime(new Date()) }]);
         }
 
         // Parse JSON
@@ -122,12 +123,12 @@ HABITS_READY
           }
           // Ensure it's an array of strings
           if (Array.isArray(habits) && habits.length > 0) {
-             habits = habits.slice(0, 6).map(h => String(h).trim());
+            habits = habits.slice(0, 6).map(h => String(h).trim());
           } else {
-             throw new Error("Parsed JSON was not an array");
+            throw new Error("Parsed JSON was not an array");
           }
         } catch (err) {
-          console.error("Failed to parse habits", err, "Raw part:", jsonPart);
+          console.error("HabitSetup: Failed to parse habits", err, "Raw part:", jsonPart);
           habits = ["Morning routine", "Deep work 2hr", "Exercise", "Read 30 min", "Reflect/journal"];
         }
 
@@ -137,26 +138,27 @@ HABITS_READY
         }, 1500);
 
       } else {
-        setMessages(prev => [...prev, { role: 'ai', text: aiResponse, time: formatTime(new Date()) }]);
+        // 🔒 SECURITY: Sanitize all AI responses to prevent XSS
+        setMessages(prev => [...prev, { role: 'ai', text: sanitizeForHTML(aiResponse), time: formatTime(new Date()) }]);
       }
     } catch (err) {
-      console.error("HabitSetup: Request error");
-      
+      console.error("HabitSetup: Request error", err);
+
       // Smart Fallback
       if (newMessages.length > 4) {
         // If the conversation is deep enough, extract user text to figure out what they want
         const allUserText = newMessages.filter(m => m.role === 'user').map(m => m.text).join(' ');
         const fallbackText = "Looks like I'm having a little trouble connecting right now, but based on what you told me, I've got enough to start! Building your tracker...";
         setMessages(prev => [...prev, { role: 'ai', text: fallbackText, time: formatTime(new Date()) }]);
-        
+
         setTimeout(() => {
           onComplete?.(getFallbackHabits(allUserText + ' ' + goalTitle));
         }, 2000);
       } else {
-        setMessages(prev => [...prev, { 
-          role: 'ai', 
-          text: "Sorry, I had a little technical hiccup. Could you say that again?", 
-          time: formatTime(new Date()) 
+        setMessages(prev => [...prev, {
+          role: 'ai',
+          text: "Sorry, I had a little technical hiccup. Could you say that again?",
+          time: formatTime(new Date())
         }]);
       }
     } finally {
@@ -178,15 +180,15 @@ HABITS_READY
       </header>
 
       {/* Messages Area */}
-      <div 
+      <div
         ref={scrollRef}
         className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6 scroll-smooth pb-32"
       >
         {messages.map((msg, i) => {
           const isAi = msg.role === 'ai';
           return (
-            <div 
-              key={i} 
+            <div
+              key={i}
               className={`flex items-end gap-2.5 max-w-[85%] sm:max-w-[75%] ${isAi ? 'self-start' : 'self-end ml-auto flex-row-reverse'}`}
               style={{ animation: 'slideIn 0.3s ease-out forwards' }}
             >
@@ -196,12 +198,11 @@ HABITS_READY
                 </div>
               )}
               <div className={`flex flex-col ${isAi ? 'items-start' : 'items-end'}`}>
-                <div 
-                  className={`px-4 py-2.5 rounded-2xl text-[15px] leading-relaxed shadow-sm whitespace-pre-wrap ${
-                    isAi 
-                      ? 'bg-[#222222] text-[#e0e0e0] rounded-bl-sm border border-white/5' 
+                <div
+                  className={`px-4 py-2.5 rounded-2xl text-[15px] leading-relaxed shadow-sm whitespace-pre-wrap ${isAi
+                      ? 'bg-[#222222] text-[#e0e0e0] rounded-bl-sm border border-white/5'
                       : 'bg-emerald-600 text-white rounded-br-sm'
-                  }`}
+                    }`}
                 >
                   {msg.text}
                 </div>
@@ -213,7 +214,7 @@ HABITS_READY
 
         {/* Typing indicator */}
         {loading && (
-          <div 
+          <div
             className="flex items-end gap-2.5 max-w-[85%] self-start"
             style={{ animation: 'slideIn 0.3s ease-out forwards' }}
           >
@@ -233,7 +234,7 @@ HABITS_READY
 
       {/* Input Area */}
       <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-[#111] via-[#111] to-transparent pt-8">
-        <form 
+        <form
           onSubmit={handleSend}
           className="flex items-center gap-2 bg-[#1c1c1c] border border-white/10 rounded-full pl-4 pr-1.5 py-1.5 max-w-2xl mx-auto shadow-xl transition-all focus-within:border-white/20 focus-within:ring-1 focus-within:ring-white/10"
         >

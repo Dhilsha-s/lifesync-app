@@ -4,14 +4,22 @@ module.exports = {
   theme: {
     extend: {
       fontFamily: {
-        sans: [
-          'Inter',
-          'system-ui',
-          '-apple-system',
-          'BlinkMacSystemFont',
-          'Segoe UI',
-          'sans-serif',
-        ],
+        sans: ['DM Sans', 'Helvetica Neue', 'sans-serif'],
+      },
+      colors: {
+        bg: 'var(--bg)',
+        surface: 'var(--surface)',
+        card: 'var(--card)',
+        border: 'var(--border)',
+        lime: 'var(--lime)',
+        pink: 'var(--pink)',
+        yellow: 'var(--yellow)',
+        cyan: 'var(--cyan)',
+        text: {
+          primary: 'var(--text-primary)',
+          muted: 'var(--text-muted)',
+          dim: 'var(--text-dim)',
+        }
       },
       boxShadow: {
         glass:

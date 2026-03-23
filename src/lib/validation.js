@@ -63,4 +63,30 @@ export function validateDeadline(deadline) {
   return { valid: true, message: '' };
 }
 
+/**
+ * 🔒 SECURITY: Sanitize text for safe HTML rendering (prevents XSS)
+ * 
+ * This function escapes special HTML characters so that user-generated content
+ * cannot inject malicious scripts or HTML.
+ * 
+ * Examples:
+ * - "<script>alert('xss')</script>" → "&lt;script&gt;alert('xss')&lt;/script&gt;"
+ * - "<img src=x onerror='hack()'>" → "&lt;img src=x onerror='hack()'&gt;"
+ * - "Normal text" → "Normal text"
+ * 
+ * Usage in React components:
+ * ❌ WRONG:  <h1>{userInput}</h1>
+ * ✅ RIGHT:  <h1>{sanitizeForHTML(userInput)}</h1>
+ * 
+ * @param {string} text - The text to sanitize
+ * @returns {string} Escaped HTML-safe text
+ */
+export function sanitizeForHTML(text) {
+  if (!text) return '';
+
+  const div = document.createElement('div');
+  div.textContent = text; // textContent automatically escapes HTML
+  return div.innerHTML;
+}
+
 export { NAME_MAX, GOAL_MAX, CHAT_INPUT_MAX };

@@ -43,13 +43,6 @@ export default function Analytics({ onNavigate, userId, groqKey }) {
   const countBest = useCountUp(stats.bestStreak, 1100);
   const countPoints = useCountUp(stats.achievementPoints, 1200); // ✨ NEW
 
-  const [spotlight, setSpotlight] = useState({ x: -999, y: -999 });
-
-  useEffect(() => {
-    const move = (e) => setSpotlight({ x: e.clientX, y: e.clientY });
-    window.addEventListener('mousemove', move);
-    return () => window.removeEventListener('mousemove', move);
-  }, []);
 
   useEffect(() => {
     async function fetchAnalytics() {
@@ -230,7 +223,7 @@ export default function Analytics({ onNavigate, userId, groqKey }) {
 
   return (
     <AppShell activeTab="analytics" onNavigate={onNavigate}>
-      <div className="pointer-events-none fixed inset-0 z-0" style={{ background: `radial-gradient(600px circle at ${spotlight.x}px ${spotlight.y}px, rgba(16,185,129,0.06), transparent 70%)` }} />
+
       <div className="relative z-10 space-y-10 max-w-5xl mx-auto py-10">
         <header className="space-y-2">
           <h1 className="text-4xl font-bold text-white tracking-tight">Analytics</h1>

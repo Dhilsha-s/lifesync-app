@@ -138,7 +138,7 @@ export default function FocusTimer({ onNavigate, userId, goalTitle = '' }) {
     }, 1000);
 
     return () => clearInterval(timerRef.current);
-  }, [isRunning, userId]);
+  }, [isRunning, userId, saveFocusSession]);
 
   // 🎵 Ambient sound toggle
   useEffect(() => {
@@ -154,10 +154,11 @@ export default function FocusTimer({ onNavigate, userId, goalTitle = '' }) {
     soundRef.current.volume = 0.3;
     if (soundRef.current) soundRef.current.play().catch(err => console.log('Audio play failed:', err));
 
+    const audio = soundRef.current;
     return () => {
-      if (soundRef.current) soundRef.current.pause();
+      if (audio) audio.pause();
     };
-  }, [selectedSound, soundRef]);
+  }, [selectedSound]);
 
   // 🎬 Rotate motivational messages
   useEffect(() => {

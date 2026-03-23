@@ -31,11 +31,6 @@ function getCurrentWeekString() {
   return `Week of ${monday.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
 }
 
-function getSliderColor(progress) {
-  if (progress <= 33) return 'bg-red-500';
-  if (progress <= 66) return 'bg-yellow-500';
-  return 'bg-emerald-500';
-}
 
 export default function GoalPlanner({ onNavigate, initialMilestones = null, goalTitle = '', deadline = '', userId, groqKey }) {
   const [loading, setLoading] = useState(true);
@@ -43,18 +38,11 @@ export default function GoalPlanner({ onNavigate, initialMilestones = null, goal
   const [milestoneData, setMilestoneData] = useState(null);
   const [habits, setHabits] = useState([]);
   const [rows, setRows] = useState([]);
-  const [spotlight, setSpotlight] = useState({ x: -999, y: -999 });
   const [lastUpdatedLabel, setLastUpdatedLabel] = useState('just now');
   const lastFetchedAt = useRef(null);
 
-
   const title = goalTitle.trim() || DEFAULT_GOAL_TITLE;
 
-  useEffect(() => {
-    const move = (e) => setSpotlight({ x: e.clientX, y: e.clientY });
-    window.addEventListener('mousemove', move);
-    return () => window.removeEventListener('mousemove', move);
-  }, []);
 
   useEffect(() => {
     async function fetchData() {
@@ -134,7 +122,7 @@ export default function GoalPlanner({ onNavigate, initialMilestones = null, goal
       }));
       setRows(newRows);
     }
-  }, [milestoneData, habits, deadline]);
+  }, [milestoneData, habits, deadline, calculateAutoProgress]);
 
   const handleReplan = async () => {
     if (!userId || replanLoading) return;

@@ -43,8 +43,7 @@ export default function HabitTracker({ onNavigate, goalTitle = '', userId, initi
   const [columns, setColumns] = useState([]);
   const [records, setRecords] = useState({});
   const [loading, setLoading] = useState(true);
-  const [toastError, setToastError] = useState('');
-  const [currentDate, setCurrentDate] = useState(new Date());
+  const currentDate = new Date();
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [chatMessages, setChatMessages] = useState([{ role: 'ai', text: "Hi! Need to tweak your habits?", time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }]);
   const [chatInput, setChatInput] = useState('');
@@ -140,7 +139,7 @@ export default function HabitTracker({ onNavigate, goalTitle = '', userId, initi
     }
 
     loadData();
-  }, [userId, initialGeneratedHabits, goalTitle]);
+  }, [userId, initialGeneratedHabits, goalTitle, todayDbString]);
 
   // AUTO-SCROLL CHAT TO BOTTOM
   useEffect(() => {

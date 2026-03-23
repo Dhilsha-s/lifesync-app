@@ -1,7 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { createRateLimiter } from '../lib/rateLimiter';
-import { validateName, validateGoal, validateDeadline, NAME_MAX, GOAL_MAX } from '../lib/validation';
 
 // Single rate limiter instance shared across submissions (10 requests / 60 s)
 const submitLimiter = createRateLimiter(10, 60_000);
@@ -19,33 +18,6 @@ function parseMilestonesJson(content) {
   return { year: toStr(parsed.year), month: toStr(parsed.month), week: toStr(parsed.week), day: toStr(parsed.day) };
 }
 
-function MagneticButton({ children, type = 'button', disabled, onClick, className }) {
-  const ref = useRef(null);
-  const handleMouseMove = (e) => {
-    const btn = ref.current;
-    if (!btn || disabled) return;
-    const rect = btn.getBoundingClientRect();
-    const x = e.clientX - rect.left - rect.width / 2;
-    const y = e.clientY - rect.top - rect.height / 2;
-    btn.style.transform = `translate(${x * 0.12}px, ${y * 0.12}px) scale(1.03)`;
-  };
-  const handleMouseLeave = () => {
-    if (ref.current) ref.current.style.transform = 'translate(0,0) scale(1)';
-  };
-  return (
-    <button
-      ref={ref}
-      type={type}
-      disabled={disabled}
-      onClick={onClick}
-      onMouseMove={handleMouseMove}
-      onMouseLeave={handleMouseLeave}
-      className={`transition-all duration-200 ease-out text-black ${className}`}
-    >
-      {children}
-    </button>
-  );
-}
 
 export default function Onboarding({ onComplete }) {
   const [name, setName] = useState('');
@@ -53,13 +25,6 @@ export default function Onboarding({ onComplete }) {
   const [deadline, setDeadline] = useState('');
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState({});
-  const [spotlight, setSpotlight] = useState({ x: -999, y: -999 });
-
-  useEffect(() => {
-    const move = (e) => setSpotlight({ x: e.clientX, y: e.clientY });
-    window.addEventListener('mousemove', move);
-    return () => window.removeEventListener('mousemove', move);
-  }, []);
 
   async function handleSubmit(e) {
     e.preventDefault();
